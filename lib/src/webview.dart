@@ -96,6 +96,9 @@ class WebviewController extends ValueNotifier<WebviewValue> {
   bool _isDisposed = false;
   bool _canGoBack = false;
   bool _canGoForward = false;
+  String? _currentUrl;
+
+  String? get currentUrl => _currentUrl;
 
   Future<void> get ready => _creatingCompleter.future;
 
@@ -181,6 +184,7 @@ class WebviewController extends ValueNotifier<WebviewValue> {
         final map = event as Map<dynamic, dynamic>;
         switch (map['type']) {
           case 'urlChanged':
+            _currentUrl = map['value'];
             _urlStreamController.add(map['value']);
             break;
           case 'onLoadError':
