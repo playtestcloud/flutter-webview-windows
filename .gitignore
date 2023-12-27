@@ -7,3 +7,10 @@
 build/
 
 pubspec.lock
+.idea/libraries/Dart_SDK.xml
+.idea/libraries/Dart_SDK.xml.bak
+.idea/libraries/Flutter_Plugins.xml
+.idea/misc.xml
+.idea/vcs.xml
+.idea/workspace.xml
+.vscode/settings.json

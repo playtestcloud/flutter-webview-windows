@@ -94,6 +94,8 @@ class WebviewController extends ValueNotifier<WebviewValue> {
   late Completer<void> _creatingCompleter;
   int _textureId = 0;
   bool _isDisposed = false;
+  bool _canGoBack = false;
+  bool _canGoForward = false;
 
   Future<void> get ready => _creatingCompleter.future;
 
@@ -190,6 +192,8 @@ class WebviewController extends ValueNotifier<WebviewValue> {
             _loadingStateStreamController.add(value);
             break;
           case 'historyChanged':
+            _canGoBack = map['value']['canGoBack'];
+            _canGoForward = map['value']['canGoForward'];
             final value = HistoryChanged(
                 map['value']['canGoBack'], map['value']['canGoForward']);
             _historyChangedStreamController.add(value);
@@ -560,6 +564,14 @@ class WebviewController extends ValueNotifier<WebviewValue> {
     assert(value.isInitialized);
     return _methodChannel
         .invokeMethod('setSize', [size.width, size.height, scaleFactor]);
+  }
+
+  bool canGoBack(){
+    return _canGoBack;
+  }
+
+  bool canGoForward(){
+    return _canGoForward;
   }
 }
 
