@@ -616,19 +616,16 @@ void Webview::SendScroll(double delta, bool horizontal) {
   constexpr auto kScrollMultiplier = 6;
   auto offset = static_cast<short>(delta * kScrollMultiplier);
 
-  POINT point;
-  point.x = 0;
-  point.y = 0;
-
   auto vk_state = virtual_keys_.state();
-  host_->RunOnSta([this, horizontal, offset, point, vk_state]() {
+  auto cursor_pos = last_cursor_pos_;
+  host_->RunOnSta([this, horizontal, offset, cursor_pos, vk_state]() {
     if (horizontal) {
       composition_controller_->SendMouseInput(
           COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL, vk_state, offset,
-          point);
+          cursor_pos);
     } else {
       composition_controller_->SendMouseInput(
-          COREWEBVIEW2_MOUSE_EVENT_KIND_WHEEL, vk_state, offset, point);
+          COREWEBVIEW2_MOUSE_EVENT_KIND_WHEEL, vk_state, offset, cursor_pos);
     }
   });
 }
