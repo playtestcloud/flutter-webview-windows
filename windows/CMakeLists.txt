@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 set(PROJECT_NAME "webview_windows")
 
-set(WIL_VERSION "1.0.220914.1")
-set(WEBVIEW_VERSION "1.0.1210.39")
+set(WIL_VERSION "1.0.250325.1")
+set(WEBVIEW_VERSION "1.0.3240.44")
 
 message(VERBOSE "CMake system version is ${CMAKE_SYSTEM_VERSION} (using SDK ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION})")
 
