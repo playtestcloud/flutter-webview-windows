@@ -49,12 +49,12 @@ class WebviewWindowsPlugin : public flutter::Plugin {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarWindows* registrar);
 
-  WebviewWindowsPlugin(flutter::TextureRegistrar* textures,
-                       flutter::BinaryMessenger* messenger);
+  explicit WebviewWindowsPlugin(flutter::PluginRegistrarWindows* registrar);
 
   virtual ~WebviewWindowsPlugin();
 
  private:
+  flutter::PluginRegistrarWindows* registrar_;
   std::unique_ptr<WebviewPlatform> platform_;
   std::unique_ptr<WebviewHost> webview_host_;
   std::unordered_map<int64_t, std::unique_ptr<WebviewBridge>> instances_;
@@ -81,8 +81,7 @@ void WebviewWindowsPlugin::RegisterWithRegistrar(
           registrar->messenger(), "io.jns.webview.win",
           &flutter::StandardMethodCodec::GetInstance());
 
-  auto plugin = std::make_unique<WebviewWindowsPlugin>(
-      registrar->texture_registrar(), registrar->messenger());
+  auto plugin = std::make_unique<WebviewWindowsPlugin>(registrar);
 
   channel->SetMethodCallHandler(
       [plugin_pointer = plugin.get()](const auto& call, auto result) {
@@ -92,9 +91,10 @@ void WebviewWindowsPlugin::RegisterWithRegistrar(
   registrar->AddPlugin(std::move(plugin));
 }
 
-WebviewWindowsPlugin::WebviewWindowsPlugin(flutter::TextureRegistrar* textures,
-                                           flutter::BinaryMessenger* messenger)
-    : textures_(textures), messenger_(messenger) {
+WebviewWindowsPlugin::WebviewWindowsPlugin(
+    flutter::PluginRegistrarWindows* registrar) : registrar_(registrar),
+    textures_(registrar->texture_registrar()),
+    messenger_(registrar->messenger()) {
   window_class_.lpszClassName = L"FlutterWebviewMessage";
   window_class_.lpfnWndProc = &DefWindowProc;
   RegisterClass(&window_class_);
@@ -179,6 +179,8 @@ void WebviewWindowsPlugin::HandleMethodCall(
 
 void WebviewWindowsPlugin::CreateWebviewInstance(
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  HWND hParent =
+      reinterpret_cast<HWND>(registrar_->GetView()->GetNativeWindow());
   if (!InitPlatform()) {
     return result->Error(kErrorUnsupportedPlatform,
                          "The platform is not supported");
@@ -192,9 +194,9 @@ void WebviewWindowsPlugin::CreateWebviewInstance(
     }
   }
 
-  auto hwnd = CreateWindowEx(0, window_class_.lpszClassName, L"", 0, CW_DEFAULT,
-                             CW_DEFAULT, 0, 0, HWND_MESSAGE, nullptr,
-                             window_class_.hInstance, nullptr);
+  auto hwnd = CreateWindowEx(
+      0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOTIFY, 9999,
+      9999, 9999, 9999, hParent, nullptr, nullptr, nullptr);
 
   std::shared_ptr<flutter::MethodResult<flutter::EncodableValue>>
       shared_result = std::move(result);
