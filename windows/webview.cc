@@ -90,6 +90,24 @@ Webview::Webview(
 }
 
 Webview::~Webview() {
+  if (host_) {
+    host_->RunOnSta([this]() {
+      if (composition_controller_) {
+        composition_controller_->put_RootVisualTarget(nullptr);
+      }
+      if (webview_controller_) {
+        webview_controller_->Close();
+      }
+      composition_controller_.reset();
+      webview_controller_.reset();
+      webview_.reset();
+      devtools_protocol_event_receiver_.reset();
+      settings2_.reset();
+      surface_ = nullptr;
+      window_target_ = nullptr;
+    });
+  }
+
   if (owns_window_) {
     DestroyWindow(hwnd_);
   }
@@ -374,65 +392,72 @@ void Webview::RegisterEventHandlers() {
 }
 
 void Webview::SetSurfaceSize(size_t width, size_t height, float scale_factor) {
-  if (!IsValid()) {
-    return;
-  }
+  if (!IsValid()) return;
+  if (!surface_ || width == 0 || height == 0) return;
 
-  if (surface_ && width > 0 && height > 0) {
-    scale_factor_ = scale_factor;
-    auto scaled_width = width * scale_factor;
-    auto scaled_height = height * scale_factor;
+  scale_factor_ = scale_factor;
+  auto scaled_width = width * scale_factor;
+  auto scaled_height = height * scale_factor;
 
-    RECT bounds;
-    bounds.left = 0;
-    bounds.top = 0;
-    bounds.right = static_cast<LONG>(scaled_width);
-    bounds.bottom = static_cast<LONG>(scaled_height);
+  RECT bounds;
+  bounds.left = 0;
+  bounds.top = 0;
+  bounds.right = static_cast<LONG>(scaled_width);
+  bounds.bottom = static_cast<LONG>(scaled_height);
 
-    surface_->put_Size({scaled_width, scaled_height});
+  surface_->put_Size({scaled_width, scaled_height});
+  host_->RunOnSta([this, scale_factor, bounds]() {
     webview_controller_->put_RasterizationScale(scale_factor);
     if (webview_controller_->put_Bounds(bounds) != S_OK) {
       std::cerr << "Setting webview bounds failed." << std::endl;
     }
+  });
 
-    if (surface_size_changed_callback_) {
-      surface_size_changed_callback_(width, height);
-    }
+  if (surface_size_changed_callback_) {
+    surface_size_changed_callback_(width, height);
   }
 }
 
 bool Webview::OpenDevTools() {
-  if (!IsValid()) {
-    return false;
-  }
-  webview_->OpenDevToolsWindow();
-  return true;
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok]() {
+    webview_->OpenDevToolsWindow();
+    ok = true;
+  });
+  return ok;
 }
 
 bool Webview::ClearCookies() {
-  if (!IsValid()) {
-    return false;
-  }
-  return webview_->CallDevToolsProtocolMethod(L"Network.clearBrowserCookies",
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok]() {
+    ok = webview_->CallDevToolsProtocolMethod(L"Network.clearBrowserCookies",
                                               L"{}", nullptr) == S_OK;
+  });
+  return ok;
 }
 
 bool Webview::ClearCache() {
-  if (!IsValid()) {
-    return false;
-  }
-  return webview_->CallDevToolsProtocolMethod(L"Network.clearBrowserCache",
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok]() {
+    ok = webview_->CallDevToolsProtocolMethod(L"Network.clearBrowserCache",
                                               L"{}", nullptr) == S_OK;
+  });
+  return ok;
 }
 
 bool Webview::SetCacheDisabled(bool disabled) {
-  if (!IsValid()) {
-    return false;
-  }
+  if (!IsValid()) return false;
+  bool ok = false;
   std::string json = std::format("{{\"disableCache\":{}}}", disabled);
-  return webview_->CallDevToolsProtocolMethod(L"Network.setCacheDisabled",
+  host_->RunOnSta([this, &ok, &json]() {
+    ok = webview_->CallDevToolsProtocolMethod(L"Network.setCacheDisabled",
                                               util::Utf16FromUtf8(json).c_str(),
                                               nullptr) == S_OK;
+  });
+  return ok;
 }
 
 void Webview::SetPopupWindowPolicy(WebviewPopupWindowPolicy policy) {
@@ -440,59 +465,57 @@ void Webview::SetPopupWindowPolicy(WebviewPopupWindowPolicy policy) {
 }
 
 bool Webview::SetUserAgent(const std::string& user_agent) {
-  if (settings2_) {
-    return settings2_->put_UserAgent(util::Utf16FromUtf8(user_agent).c_str()) ==
-           S_OK;
-  }
-  return false;
+  if (!settings2_) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok, &user_agent]() {
+    ok = settings2_->put_UserAgent(util::Utf16FromUtf8(user_agent).c_str()) ==
+         S_OK;
+  });
+  return ok;
 }
 
 bool Webview::SetBackgroundColor(int32_t color) {
-  if (!IsValid()) {
-    return false;
-  }
-
+  if (!IsValid()) return false;
   COREWEBVIEW2_COLOR webview_color;
   ConvertColor(webview_color, color);
-
-  // Semi-transparent backgrounds are not supported.
-  // Valid alpha values are 0 or 255.
   if (webview_color.A > 0) {
     webview_color.A = 0xFF;
   }
-
-  return webview_controller_->put_DefaultBackgroundColor(webview_color) == S_OK;
+  bool ok = false;
+  host_->RunOnSta([this, &ok, webview_color]() {
+    ok = webview_controller_->put_DefaultBackgroundColor(webview_color) == S_OK;
+  });
+  return ok;
 }
 
 bool Webview::SetZoomFactor(double factor) {
-  if (!IsValid()) {
-    return false;
-  }
-  return webview_controller_->put_ZoomFactor(factor) == S_OK;
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok, factor]() {
+    ok = webview_controller_->put_ZoomFactor(factor) == S_OK;
+  });
+  return ok;
 }
 
 void Webview::SetCursorPos(double x, double y) {
-  if (!IsValid()) {
-    return;
-  }
+  if (!IsValid()) return;
 
   POINT point;
   point.x = static_cast<LONG>(x * scale_factor_);
   point.y = static_cast<LONG>(y * scale_factor_);
   last_cursor_pos_ = point;
 
-  // https://docs.microsoft.com/en-us/microsoft-edge/webview2/reference/win32/icorewebview2?view=webview2-1.0.774.44
-  composition_controller_->SendMouseInput(
-      COREWEBVIEW2_MOUSE_EVENT_KIND::COREWEBVIEW2_MOUSE_EVENT_KIND_MOVE,
-      virtual_keys_.state(), 0, point);
+  host_->RunOnSta([this, point]() {
+    composition_controller_->SendMouseInput(
+        COREWEBVIEW2_MOUSE_EVENT_KIND::COREWEBVIEW2_MOUSE_EVENT_KIND_MOVE,
+        virtual_keys_.state(), 0, point);
+  });
 }
 
 void Webview::SetPointerUpdate(int32_t pointer,
                                WebviewPointerEventKind eventKind, double x,
                                double y, double size, double pressure) {
-  if (!IsValid()) {
-    return;
-  }
+  if (!IsValid()) return;
 
   COREWEBVIEW2_POINTER_EVENT_KIND event =
       COREWEBVIEW2_POINTER_EVENT_KIND_UPDATE;
@@ -549,15 +572,15 @@ void Webview::SetPointerUpdate(int32_t pointer,
                          (UINT32)0, (UINT32)1024));
           pInfo->put_PixelLocationRaw(point);
           pInfo->put_TouchContactRaw(rect);
-          composition_controller_->SendPointerInput(event, pInfo);
+          host_->RunOnSta([this, event, pInfo]() {
+            composition_controller_->SendPointerInput(event, pInfo);
+          });
         }
       });
 }
 
 void Webview::SetPointerButtonState(WebviewPointerButton button, bool is_down) {
-  if (!IsValid()) {
-    return;
-  }
+  if (!IsValid()) return;
 
   COREWEBVIEW2_MOUSE_EVENT_KIND kind;
   switch (button) {
@@ -580,89 +603,92 @@ void Webview::SetPointerButtonState(WebviewPointerButton button, bool is_down) {
       kind = static_cast<COREWEBVIEW2_MOUSE_EVENT_KIND>(0);
   }
 
-  composition_controller_->SendMouseInput(kind, virtual_keys_.state(), 0,
-                                          last_cursor_pos_);
+  host_->RunOnSta([this, kind]() {
+    composition_controller_->SendMouseInput(kind, virtual_keys_.state(), 0,
+                                            last_cursor_pos_);
+  });
 }
 
 void Webview::SendScroll(double delta, bool horizontal) {
-  // delta * 6 gives me a multiple of WHEEL_DELTA (120)
   constexpr auto kScrollMultiplier = 6;
-
   auto offset = static_cast<short>(delta * kScrollMultiplier);
 
   POINT point;
   point.x = 0;
   point.y = 0;
 
-  if (horizontal) {
-    composition_controller_->SendMouseInput(
-        COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL, virtual_keys_.state(),
-        offset, point);
-  } else {
-    composition_controller_->SendMouseInput(COREWEBVIEW2_MOUSE_EVENT_KIND_WHEEL,
-                                            virtual_keys_.state(), offset,
-                                            point);
-  }
+  host_->RunOnSta([this, horizontal, offset, point]() {
+    if (horizontal) {
+      composition_controller_->SendMouseInput(
+          COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL,
+          virtual_keys_.state(), offset, point);
+    } else {
+      composition_controller_->SendMouseInput(
+          COREWEBVIEW2_MOUSE_EVENT_KIND_WHEEL, virtual_keys_.state(), offset,
+          point);
+    }
+  });
 }
 
 void Webview::SetScrollDelta(double delta_x, double delta_y) {
-  if (!IsValid()) {
-    return;
-  }
-
-  if (delta_x != 0.0) {
-    SendScroll(delta_x, true);
-  }
-  if (delta_y != 0.0) {
-    SendScroll(delta_y, false);
-  }
+  if (!IsValid()) return;
+  if (delta_x != 0.0) SendScroll(delta_x, true);
+  if (delta_y != 0.0) SendScroll(delta_y, false);
 }
 
 void Webview::LoadUrl(const std::string& url) {
-  if (IsValid()) {
+  if (!IsValid()) return;
+  host_->RunOnSta([this, url]() {
     webview_->Navigate(util::Utf16FromUtf8(url).c_str());
-  }
+  });
 }
 
 void Webview::LoadStringContent(const std::string& content) {
-  if (IsValid()) {
+  if (!IsValid()) return;
+  host_->RunOnSta([this, content]() {
     webview_->NavigateToString(util::Utf16FromUtf8(content).c_str());
-  }
+  });
 }
 
 bool Webview::Stop() {
-  if (!IsValid()) {
-    return false;
-  }
-  return SUCCEEDED(webview_->CallDevToolsProtocolMethod(L"Page.stopLoading",
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok]() {
+    ok = SUCCEEDED(webview_->CallDevToolsProtocolMethod(L"Page.stopLoading",
                                                         L"{}", nullptr));
+  });
+  return ok;
 }
 
 bool Webview::Reload() {
-  if (!IsValid()) {
-    return false;
-  }
-  return SUCCEEDED(webview_->Reload());
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok]() { ok = SUCCEEDED(webview_->Reload()); });
+  return ok;
 }
 
 bool Webview::GoBack() {
-  if (!IsValid()) {
-    return false;
-  }
-  return SUCCEEDED(webview_->GoBack());
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok]() { ok = SUCCEEDED(webview_->GoBack()); });
+  return ok;
 }
 
 bool Webview::GoForward() {
-  if (!IsValid()) {
-    return false;
-  }
-  return SUCCEEDED(webview_->GoForward());
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok]() { ok = SUCCEEDED(webview_->GoForward()); });
+  return ok;
 }
 
 void Webview::AddScriptToExecuteOnDocumentCreated(
     const std::string& script,
     AddScriptToExecuteOnDocumentCreatedCallback callback) {
-  if (IsValid()) {
+  if (!IsValid()) {
+    callback(false, std::string());
+    return;
+  }
+  host_->RunOnSta([this, script, callback]() {
     if (SUCCEEDED(webview_->AddScriptToExecuteOnDocumentCreated(
             util::Utf16FromUtf8(script).c_str(),
             Callback<
@@ -675,22 +701,26 @@ void Webview::AddScriptToExecuteOnDocumentCreated(
                 .Get()))) {
       return;
     }
-  }
-
-  callback(false, std::string());
+    callback(false, std::string());
+  });
 }
 
 void Webview::RemoveScriptToExecuteOnDocumentCreated(
     const std::string& script_id) {
-  if (IsValid()) {
+  if (!IsValid()) return;
+  host_->RunOnSta([this, script_id]() {
     webview_->RemoveScriptToExecuteOnDocumentCreated(
         util::Utf16FromUtf8(script_id).c_str());
-  }
+  });
 }
 
 void Webview::ExecuteScript(const std::string& script,
                             ScriptExecutedCallback callback) {
-  if (IsValid()) {
+  if (!IsValid()) {
+    callback(false, std::string());
+    return;
+  }
+  host_->RunOnSta([this, script, callback]() {
     if (SUCCEEDED(webview_->ExecuteScript(
             util::Utf16FromUtf8(script).c_str(),
             Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
@@ -702,65 +732,51 @@ void Webview::ExecuteScript(const std::string& script,
                 .Get()))) {
       return;
     }
-  }
-
-  callback(false, std::string());
+    callback(false, std::string());
+  });
 }
 
 bool Webview::PostWebMessage(const std::string& json) {
-  if (!IsValid()) {
-    return false;
-  }
-  return webview_->PostWebMessageAsJson(util::Utf16FromUtf8(json).c_str()) ==
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok, &json]() {
+    ok = webview_->PostWebMessageAsJson(util::Utf16FromUtf8(json).c_str()) ==
          S_OK;
+  });
+  return ok;
 }
 
 bool Webview::Suspend() {
-  if (!IsValid()) {
-    return false;
-  }
-
-  wil::com_ptr<ICoreWebView2_3> webview;
-  webview = webview_.query<ICoreWebView2_3>();
-  if (!webview) {
-    return false;
-  }
-
-  webview_controller_->put_IsVisible(false);
-  return webview->TrySuspend(
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok]() {
+    wil::com_ptr<ICoreWebView2_3> wv3 = webview_.query<ICoreWebView2_3>();
+    if (!wv3) return;
+    webview_controller_->put_IsVisible(false);
+    ok = wv3->TrySuspend(
              Callback<ICoreWebView2TrySuspendCompletedHandler>(
-                 [](HRESULT error_code, BOOL is_successful) -> HRESULT {
-                   return S_OK;
-                 })
+                 [](HRESULT, BOOL) -> HRESULT { return S_OK; })
                  .Get()) == S_OK;
+  });
+  return ok;
 }
 
 bool Webview::Resume() {
-  if (!IsValid()) {
-    return false;
-  }
-
-  wil::com_ptr<ICoreWebView2_3> webview;
-  webview = webview_.query<ICoreWebView2_3>();
-  if (!webview) {
-    return false;
-  }
-  return webview->Resume() == S_OK &&
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok]() {
+    wil::com_ptr<ICoreWebView2_3> wv3 = webview_.query<ICoreWebView2_3>();
+    if (!wv3) return;
+    ok = wv3->Resume() == S_OK &&
          webview_controller_->put_IsVisible(true) == S_OK;
+  });
+  return ok;
 }
 
 bool Webview::SetVirtualHostNameMapping(
     const std::string& hostName, const std::string& path,
     WebviewHostResourceAccessKind accessKind) {
-  if (!IsValid()) {
-    return false;
-  }
-
-  wil::com_ptr<ICoreWebView2_3> webview;
-  webview = webview_.query<ICoreWebView2_3>();
-  if (!webview) {
-    return false;
-  }
+  if (!IsValid()) return false;
 
   COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND accessKindIntValue =
       COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY;
@@ -776,22 +792,25 @@ bool Webview::SetVirtualHostNameMapping(
       break;
   }
 
-  return webview->SetVirtualHostNameToFolderMapping(
-      util::Utf16FromUtf8(hostName).c_str(), util::Utf16FromUtf8(path).c_str(),
-      accessKindIntValue);
+  bool ok = false;
+  host_->RunOnSta([this, &ok, hostName, path, accessKindIntValue]() {
+    wil::com_ptr<ICoreWebView2_3> wv3 = webview_.query<ICoreWebView2_3>();
+    if (!wv3) return;
+    ok = wv3->SetVirtualHostNameToFolderMapping(
+        util::Utf16FromUtf8(hostName).c_str(),
+        util::Utf16FromUtf8(path).c_str(), accessKindIntValue);
+  });
+  return ok;
 }
 
 bool Webview::ClearVirtualHostNameMapping(const std::string& hostName) {
-  if (!IsValid()) {
-    return false;
-  }
-
-  wil::com_ptr<ICoreWebView2_3> webview;
-  webview = webview_.query<ICoreWebView2_3>();
-  if (!webview) {
-    return false;
-  }
-
-  return webview->ClearVirtualHostNameToFolderMapping(
-      util::Utf16FromUtf8(hostName).c_str());
+  if (!IsValid()) return false;
+  bool ok = false;
+  host_->RunOnSta([this, &ok, hostName]() {
+    wil::com_ptr<ICoreWebView2_3> wv3 = webview_.query<ICoreWebView2_3>();
+    if (!wv3) return;
+    ok = wv3->ClearVirtualHostNameToFolderMapping(
+        util::Utf16FromUtf8(hostName).c_str());
+  });
+  return ok;
 }
