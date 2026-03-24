@@ -357,7 +357,6 @@ void WebviewHost::CreateWebViewPointerInfo(
     ICoreWebView2PointerInfo* pointer = nullptr;
     resultHr = webview_env_->CreateCoreWebView2PointerInfo(&pointer);
     if (SUCCEEDED(resultHr) && pointer) {
-      pointer->AddRef();
       resultPointer.attach(pointer);
     }
     SetEvent(doneEvent);

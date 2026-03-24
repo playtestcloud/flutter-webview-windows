@@ -505,10 +505,11 @@ void Webview::SetCursorPos(double x, double y) {
   point.y = static_cast<LONG>(y * scale_factor_);
   last_cursor_pos_ = point;
 
-  host_->RunOnSta([this, point]() {
+  auto vk_state = virtual_keys_.state();
+  host_->RunOnSta([this, point, vk_state]() {
     composition_controller_->SendMouseInput(
         COREWEBVIEW2_MOUSE_EVENT_KIND::COREWEBVIEW2_MOUSE_EVENT_KIND_MOVE,
-        virtual_keys_.state(), 0, point);
+        vk_state, 0, point);
   });
 }
 
@@ -562,17 +563,18 @@ void Webview::SetPointerUpdate(int32_t pointer,
           std::unique_ptr<WebviewCreationError> error) {
         if (pointerInfo) {
           ICoreWebView2PointerInfo* pInfo = pointerInfo.get();
-          pInfo->put_PointerId(pointer);
-          pInfo->put_PointerKind(PT_TOUCH);
-          pInfo->put_PointerFlags(pointerFlags);
-          pInfo->put_TouchFlags(TOUCH_FLAG_NONE);
-          pInfo->put_TouchMask(TOUCH_MASK_CONTACTAREA | TOUCH_MASK_PRESSURE);
-          pInfo->put_TouchPressure(
-              std::clamp((UINT32)(pressure == 0.0 ? 1024 : 1024 * pressure),
-                         (UINT32)0, (UINT32)1024));
-          pInfo->put_PixelLocationRaw(point);
-          pInfo->put_TouchContactRaw(rect);
-          host_->RunOnSta([this, event, pInfo]() {
+          host_->RunOnSta([this, event, pInfo, pointer, pointerFlags, point,
+                           rect, pressure]() {
+            pInfo->put_PointerId(pointer);
+            pInfo->put_PointerKind(PT_TOUCH);
+            pInfo->put_PointerFlags(pointerFlags);
+            pInfo->put_TouchFlags(TOUCH_FLAG_NONE);
+            pInfo->put_TouchMask(TOUCH_MASK_CONTACTAREA | TOUCH_MASK_PRESSURE);
+            pInfo->put_TouchPressure(
+                std::clamp((UINT32)(pressure == 0.0 ? 1024 : 1024 * pressure),
+                           (UINT32)0, (UINT32)1024));
+            pInfo->put_PixelLocationRaw(point);
+            pInfo->put_TouchContactRaw(rect);
             composition_controller_->SendPointerInput(event, pInfo);
           });
         }
@@ -603,9 +605,10 @@ void Webview::SetPointerButtonState(WebviewPointerButton button, bool is_down) {
       kind = static_cast<COREWEBVIEW2_MOUSE_EVENT_KIND>(0);
   }
 
-  host_->RunOnSta([this, kind]() {
-    composition_controller_->SendMouseInput(kind, virtual_keys_.state(), 0,
-                                            last_cursor_pos_);
+  auto vk_state = virtual_keys_.state();
+  auto cursor_pos = last_cursor_pos_;
+  host_->RunOnSta([this, kind, vk_state, cursor_pos]() {
+    composition_controller_->SendMouseInput(kind, vk_state, 0, cursor_pos);
   });
 }
 
@@ -617,15 +620,15 @@ void Webview::SendScroll(double delta, bool horizontal) {
   point.x = 0;
   point.y = 0;
 
-  host_->RunOnSta([this, horizontal, offset, point]() {
+  auto vk_state = virtual_keys_.state();
+  host_->RunOnSta([this, horizontal, offset, point, vk_state]() {
     if (horizontal) {
       composition_controller_->SendMouseInput(
-          COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL,
-          virtual_keys_.state(), offset, point);
+          COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL, vk_state, offset,
+          point);
     } else {
       composition_controller_->SendMouseInput(
-          COREWEBVIEW2_MOUSE_EVENT_KIND_WHEEL, virtual_keys_.state(), offset,
-          point);
+          COREWEBVIEW2_MOUSE_EVENT_KIND_WHEEL, vk_state, offset, point);
     }
   });
 }
