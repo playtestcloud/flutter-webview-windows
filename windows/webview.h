@@ -133,10 +133,10 @@ class Webview {
   void SetScrollDelta(double delta_x, double delta_y);
   void LoadUrl(const std::string& url);
   void LoadStringContent(const std::string& content);
-  bool Stop();
-  bool Reload();
-  bool GoBack();
-  bool GoForward();
+  HRESULT Stop();
+  HRESULT Reload();
+  HRESULT GoBack();
+  HRESULT GoForward();
   void AddScriptToExecuteOnDocumentCreated(
       const std::string& script,
       AddScriptToExecuteOnDocumentCreatedCallback callback);

@@ -53,6 +53,10 @@ constexpr auto kErrorNotSupported = "not_supported";
 constexpr auto kScriptFailed = "script_failed";
 constexpr auto kMethodFailed = "method_failed";
 
+std::string HResultMessage(HRESULT hr) {
+  return std::format("HRESULT 0x{:08X}", static_cast<unsigned long>(hr));
+}
+
 static const std::optional<std::pair<double, double>> GetPointFromArgs(
     const flutter::EncodableValue* args) {
   const flutter::EncodableList* list =
@@ -450,34 +454,38 @@ void WebviewBridge::HandleMethodCall(
 
   // reload
   if (method_name.compare(kMethodReload) == 0) {
-    if (webview_->Reload()) {
+    const HRESULT hr = webview_->Reload();
+    if (SUCCEEDED(hr)) {
       return result->Success();
     }
-    return result->Error(kMethodFailed);
+    return result->Error(kMethodFailed, HResultMessage(hr));
   }
 
   // stop
   if (method_name.compare(kMethodStop) == 0) {
-    if (webview_->Stop()) {
+    const HRESULT hr = webview_->Stop();
+    if (SUCCEEDED(hr)) {
       return result->Success();
     }
-    return result->Error(kMethodFailed);
+    return result->Error(kMethodFailed, HResultMessage(hr));
   }
 
   // goBack
   if (method_name.compare(kMethodGoBack) == 0) {
-    if (webview_->GoBack()) {
+    const HRESULT hr = webview_->GoBack();
+    if (SUCCEEDED(hr)) {
       return result->Success();
     }
-    return result->Error(kMethodFailed);
+    return result->Error(kMethodFailed, HResultMessage(hr));
   }
 
   // goForward
   if (method_name.compare(kMethodGoForward) == 0) {
-    if (webview_->GoForward()) {
+    const HRESULT hr = webview_->GoForward();
+    if (SUCCEEDED(hr)) {
       return result->Success();
     }
-    return result->Error(kMethodFailed);
+    return result->Error(kMethodFailed, HResultMessage(hr));
   }
 
   // suspend

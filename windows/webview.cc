@@ -4,6 +4,7 @@
 
 #include <format>
 #include <iostream>
+#include <winerror.h>
 
 #include "util/composition.desktop.interop.h"
 #include "util/string_converter.h"
@@ -662,35 +663,43 @@ void Webview::LoadStringContent(const std::string& content) {
   });
 }
 
-bool Webview::Stop() {
-  if (!IsValid()) return false;
-  bool ok = false;
-  host_->RunOnSta([this, &ok]() {
-    ok = SUCCEEDED(webview_->CallDevToolsProtocolMethod(L"Page.stopLoading",
-                                                        L"{}", nullptr));
+HRESULT Webview::Stop() {
+  if (!IsValid()) {
+    return HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
+  }
+  HRESULT hr = E_FAIL;
+  host_->RunOnSta([this, &hr]() {
+    hr = webview_->CallDevToolsProtocolMethod(L"Page.stopLoading", L"{}",
+                                              nullptr);
   });
-  return ok;
+  return hr;
 }
 
-bool Webview::Reload() {
-  if (!IsValid()) return false;
-  bool ok = false;
-  host_->RunOnSta([this, &ok]() { ok = SUCCEEDED(webview_->Reload()); });
-  return ok;
+HRESULT Webview::Reload() {
+  if (!IsValid()) {
+    return HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
+  }
+  HRESULT hr = E_FAIL;
+  host_->RunOnSta([this, &hr]() { hr = webview_->Reload(); });
+  return hr;
 }
 
-bool Webview::GoBack() {
-  if (!IsValid()) return false;
-  bool ok = false;
-  host_->RunOnSta([this, &ok]() { ok = SUCCEEDED(webview_->GoBack()); });
-  return ok;
+HRESULT Webview::GoBack() {
+  if (!IsValid()) {
+    return HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
+  }
+  HRESULT hr = E_FAIL;
+  host_->RunOnSta([this, &hr]() { hr = webview_->GoBack(); });
+  return hr;
 }
 
-bool Webview::GoForward() {
-  if (!IsValid()) return false;
-  bool ok = false;
-  host_->RunOnSta([this, &ok]() { ok = SUCCEEDED(webview_->GoForward()); });
-  return ok;
+HRESULT Webview::GoForward() {
+  if (!IsValid()) {
+    return HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
+  }
+  HRESULT hr = E_FAIL;
+  host_->RunOnSta([this, &hr]() { hr = webview_->GoForward(); });
+  return hr;
 }
 
 void Webview::AddScriptToExecuteOnDocumentCreated(
