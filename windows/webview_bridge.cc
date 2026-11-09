@@ -14,6 +14,7 @@
 namespace {
 constexpr auto kErrorInvalidArgs = "invalidArguments";
 
+constexpr auto kMethodCompleteHttpAuth = "completeHttpAuth";
 constexpr auto kMethodLoadUrl = "loadUrl";
 constexpr auto kMethodLoadStringContent = "loadStringContent";
 constexpr auto kMethodReload = "reload";
@@ -48,6 +49,7 @@ constexpr auto kMethodSetFpsLimit = "setFpsLimit";
 
 constexpr auto kEventType = "type";
 constexpr auto kEventValue = "value";
+constexpr auto kEventHttpAuthRequested = "httpAuthRequested";
 
 constexpr auto kErrorNotSupported = "not_supported";
 constexpr auto kScriptFailed = "script_failed";
@@ -211,10 +213,80 @@ WebviewBridge::WebviewBridge(flutter::BinaryMessenger* messenger,
       });
 
   event_channel_->SetStreamHandler(std::move(handler));
+
+  // WebView2 callbacks run on its STA; Flutter events need the platform thread.
+  WNDCLASSW window_class{};
+  window_class.lpfnWndProc = EventWindowProc;
+  window_class.hInstance = GetModuleHandleW(nullptr);
+  window_class.lpszClassName = L"FlutterWebviewEvents";
+  RegisterClassW(&window_class);
+  event_window_ =
+      CreateWindowExW(0, window_class.lpszClassName, L"", 0, 0, 0, 0, 0,
+                      HWND_MESSAGE, nullptr, window_class.hInstance, this);
+  webview_->OnHttpAuthRequested(
+      [this](int64_t id, const std::string& uri, const std::string& challenge) {
+        return EmitEvent(flutter::EncodableMap{
+            {flutter::EncodableValue(kEventType),
+             flutter::EncodableValue(kEventHttpAuthRequested)},
+            {flutter::EncodableValue(kEventValue),
+             flutter::EncodableValue(flutter::EncodableMap{
+                 {flutter::EncodableValue("id"), flutter::EncodableValue(id)},
+                 {flutter::EncodableValue("uri"), flutter::EncodableValue(uri)},
+                 {flutter::EncodableValue("challenge"),
+                  flutter::EncodableValue(challenge)}})}});
+      });
+}
+
+LRESULT CALLBACK WebviewBridge::EventWindowProc(HWND hwnd, UINT message,
+                                             WPARAM wparam, LPARAM lparam) {
+  if (message == WM_NCCREATE) {
+    const auto create = reinterpret_cast<CREATESTRUCTW*>(lparam);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                      reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+  }
+  if (message == WM_APP) {
+    const auto bridge = reinterpret_cast<WebviewBridge*>(
+        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (bridge) bridge->DispatchEvents();
+    return 0;
+  }
+  return DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
+void WebviewBridge::DispatchEvents() {
+  std::queue<flutter::EncodableValue> events;
+  {
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    if (is_disposing_) return;
+    events.swap(pending_events_);
+  }
+  while (!events.empty()) {
+    auto event = std::move(events.front());
+    events.pop();
+    if (event_sink_) {
+      event_sink_->Success(event);
+    } else {
+      const auto& map = std::get<flutter::EncodableMap>(event);
+      if (map.at(flutter::EncodableValue(kEventType)) ==
+          flutter::EncodableValue(kEventHttpAuthRequested)) {
+        const auto& request = std::get<flutter::EncodableMap>(
+            map.at(flutter::EncodableValue(kEventValue)));
+        webview_->CancelHttpAuthRequest(
+            std::get<int64_t>(request.at(flutter::EncodableValue("id"))));
+      }
+    }
+  }
 }
 
 WebviewBridge::~WebviewBridge() {
+  {
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    is_disposing_ = true;
+  }
   method_channel_->SetMethodCallHandler(nullptr);
+  webview_->OnHttpAuthRequested(nullptr);
+  webview_.reset();
+  if (event_window_) DestroyWindow(event_window_);
   texture_registrar_->UnregisterTexture(texture_id_);
 }
 
@@ -353,6 +425,37 @@ void WebviewBridge::HandleMethodCall(
     const flutter::MethodCall<flutter::EncodableValue>& method_call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   const auto& method_name = method_call.method_name();
+
+  if (method_name == kMethodCompleteHttpAuth) {
+    const auto args =
+        std::get_if<flutter::EncodableMap>(method_call.arguments());
+    if (!args) return result->Error(kErrorInvalidArgs);
+    const auto id_it = args->find(flutter::EncodableValue("id"));
+    if (id_it == args->end()) return result->Error(kErrorInvalidArgs);
+    int64_t id;
+    if (const auto value = std::get_if<int32_t>(&id_it->second))
+      id = *value;
+    else if (const auto value64 = std::get_if<int64_t>(&id_it->second))
+      id = *value64;
+    else
+      return result->Error(kErrorInvalidArgs);
+    std::optional<std::pair<std::string, std::string>> credentials;
+    const auto user = args->find(flutter::EncodableValue("user"));
+    const auto password = args->find(flutter::EncodableValue("password"));
+    if (user != args->end() || password != args->end()) {
+      if (user == args->end() || password == args->end() ||
+          !std::holds_alternative<std::string>(user->second) ||
+          !std::holds_alternative<std::string>(password->second)) {
+        webview_->CompleteHttpAuth(id, std::nullopt);
+        return result->Error(kErrorInvalidArgs);
+      }
+      credentials = {std::get<std::string>(user->second),
+                     std::get<std::string>(password->second)};
+    }
+    const auto hr = webview_->CompleteHttpAuth(id, credentials);
+    if (FAILED(hr)) return result->Error(kMethodFailed, HResultMessage(hr));
+    return result->Success();
+  }
 
   // setCursorPos: [double x, double y]
   if (method_name.compare(kMethodSetCursorPos) == 0) {

@@ -6,6 +6,8 @@
 #include <flutter/texture_registrar.h>
 
 #include <memory>
+#include <mutex>
+#include <queue>
 
 #include "graphics_context.h"
 #include "texture_bridge.h"
@@ -22,6 +24,9 @@ class WebviewBridge {
   TextureBridge* texture_bridge() const { return texture_bridge_.get(); }
 
   int64_t texture_id() const { return texture_id_; }
+  bool IsHttpAuthSupported() const {
+    return event_window_ && webview_->IsHttpAuthSupported();
+  }
 
  private:
   std::unique_ptr<flutter::TextureVariant> flutter_texture_;
@@ -36,16 +41,27 @@ class WebviewBridge {
   flutter::TextureRegistrar* texture_registrar_;
   int64_t texture_id_;
 
+  HWND event_window_ = nullptr;
+  std::mutex event_mutex_;
+  std::queue<flutter::EncodableValue> pending_events_;
+  bool is_disposing_ = false;
+  static LRESULT CALLBACK EventWindowProc(HWND hwnd, UINT message,
+                                        WPARAM wparam, LPARAM lparam);
+  void DispatchEvents();
+
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& method_call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
   void RegisterEventHandlers();
 
   template <typename T>
-  void EmitEvent(const T& value) {
-    if (event_sink_) {
-      event_sink_->Success(value);
-    }
+  bool EmitEvent(const T& value) {
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    if (is_disposing_ || !event_window_ ||
+        !PostMessageW(event_window_, WM_APP, 0, 0))
+      return false;
+    pending_events_.push(flutter::EncodableValue(value));
+    return true;
   }
 
   void OnPermissionRequested(

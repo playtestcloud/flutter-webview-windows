@@ -86,6 +86,7 @@ Webview::Webview(
 
   EnableSecurityUpdates();
   RegisterEventHandlers();
+  RegisterHttpAuthHandler();
 
   is_valid_ = CreateSurface(host->compositor(), hwnd, offscreen_only);
 }
@@ -93,6 +94,12 @@ Webview::Webview(
 Webview::~Webview() {
   if (host_) {
     host_->RunOnSta([this]() {
+      if (http_auth_supported_) {
+        webview_.query<ICoreWebView2_10>()->remove_BasicAuthenticationRequested(
+            event_registrations_.http_auth_requested_token_);
+      }
+      http_auth_requested_callback_ = nullptr;
+      CancelHttpAuthRequests();
       if (composition_controller_) {
         composition_controller_->put_RootVisualTarget(nullptr);
       }
@@ -111,6 +118,84 @@ Webview::~Webview() {
 
   if (owns_window_) {
     DestroyWindow(hwnd_);
+  }
+}
+
+void Webview::OnHttpAuthRequested(HttpAuthRequestedCallback callback) {
+  host_->RunOnSta([this, callback = std::move(callback)]() mutable {
+    http_auth_requested_callback_ = std::move(callback);
+    if (!http_auth_requested_callback_) CancelHttpAuthRequests();
+  });
+}
+
+void Webview::RegisterHttpAuthHandler() {
+  auto webview10 = webview_.try_query<ICoreWebView2_10>();
+  if (!webview10) return;
+  const auto result = webview10->add_BasicAuthenticationRequested(
+      Callback<ICoreWebView2BasicAuthenticationRequestedEventHandler>(
+          [this](ICoreWebView2*,
+                 ICoreWebView2BasicAuthenticationRequestedEventArgs* args)
+              -> HRESULT {
+            args->put_Cancel(TRUE);
+            wil::unique_cotaskmem_string uri;
+            wil::unique_cotaskmem_string challenge;
+            PendingHttpAuth pending;
+            if (!http_auth_requested_callback_ || FAILED(args->get_Uri(&uri)) ||
+                FAILED(args->get_Challenge(&challenge)) ||
+                FAILED(args->GetDeferral(pending.deferral.put())))
+              return S_OK;
+            pending.args = args;
+            const auto id = ++next_http_auth_id_;
+            pending_http_auth_.emplace(id, std::move(pending));
+            if (!http_auth_requested_callback_(
+                    id, util::Utf8FromUtf16(uri.get()),
+                    util::Utf8FromUtf16(challenge.get()))) {
+              CompleteHttpAuth(id, std::nullopt);
+            }
+            return S_OK;
+          })
+          .Get(),
+      &event_registrations_.http_auth_requested_token_);
+  http_auth_supported_ = SUCCEEDED(result);
+}
+
+HRESULT Webview::CompleteHttpAuth(
+    int64_t id,
+    const std::optional<std::pair<std::string, std::string>>& credentials) {
+  HRESULT result = S_FALSE;
+  host_->RunOnSta([this, id, &credentials, &result]() {
+    auto it = pending_http_auth_.find(id);
+    if (it == pending_http_auth_.end()) return;
+    auto pending = std::move(it->second);
+    pending_http_auth_.erase(it);
+    result = S_OK;
+    if (credentials) {
+      wil::com_ptr<ICoreWebView2BasicAuthenticationResponse> response;
+      result = pending.args->get_Response(response.put());
+      if (SUCCEEDED(result)) {
+        result = response->put_UserName(
+            util::Utf16FromUtf8(credentials->first).c_str());
+      }
+      if (SUCCEEDED(result)) {
+        result = response->put_Password(
+            util::Utf16FromUtf8(credentials->second).c_str());
+      }
+      if (SUCCEEDED(result)) result = pending.args->put_Cancel(FALSE);
+    }
+    const auto completion = pending.deferral->Complete();
+    if (SUCCEEDED(result)) result = completion;
+  });
+  return result;
+}
+
+void Webview::CancelHttpAuthRequest(int64_t id) {
+  // The destructor's synchronous STA cleanup drains this queued work first.
+  host_->PostToSta([this, id]() { CompleteHttpAuth(id, std::nullopt); });
+}
+
+void Webview::CancelHttpAuthRequests() {
+  while (!pending_http_auth_.empty()) {
+    CompleteHttpAuth(pending_http_auth_.begin()->first, std::nullopt);
   }
 }
 

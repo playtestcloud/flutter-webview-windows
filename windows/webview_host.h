@@ -71,10 +71,10 @@ class WebviewHost {
 
   explicit WebviewHost(WebviewPlatform* platform);
   void StaThreadMain();
-  void PostToSta(std::function<void()> work);
   void CreateWebViewCompositionController(
       HWND hwnd, CompositionControllerCreationCallback cb);
 
  public:
   void RunOnSta(std::function<void()> work);
+  void PostToSta(std::function<void()> work);
 };

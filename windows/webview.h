@@ -7,6 +7,8 @@
 #include <winrt/base.h>
 
 #include <functional>
+#include <map>
+#include <optional>
 
 class WebviewHost;
 
@@ -74,6 +76,7 @@ struct VirtualKeyState {
 };
 
 struct EventRegistrations {
+  EventRegistrationToken http_auth_requested_token_{};
   EventRegistrationToken source_changed_token_{};
   EventRegistrationToken content_loading_token_{};
   EventRegistrationToken navigation_completed_token_{};
@@ -117,7 +120,16 @@ class Webview {
   typedef std::function<void(bool contains_fullscreen_element)>
       ContainsFullScreenElementChangedCallback;
 
+  typedef std::function<bool(int64_t, const std::string&, const std::string&)>
+      HttpAuthRequestedCallback;
+
   ~Webview();
+  bool IsHttpAuthSupported() const { return http_auth_supported_; }
+  HRESULT CompleteHttpAuth(
+      int64_t id,
+      const std::optional<std::pair<std::string, std::string>>& credentials);
+  void OnHttpAuthRequested(HttpAuthRequestedCallback callback);
+  void CancelHttpAuthRequest(int64_t id);
 
   ABI::Windows::UI::Composition::IVisual* const surface() {
     return surface_.get();
@@ -210,6 +222,18 @@ class Webview {
   }
 
  private:
+  struct PendingHttpAuth {
+    wil::com_ptr<ICoreWebView2BasicAuthenticationRequestedEventArgs> args;
+    wil::com_ptr<ICoreWebView2Deferral> deferral;
+  };
+
+  void CancelHttpAuthRequests();
+  HttpAuthRequestedCallback http_auth_requested_callback_;
+  std::map<int64_t, PendingHttpAuth> pending_http_auth_;
+  int64_t next_http_auth_id_ = 0;
+  bool http_auth_supported_ = false;
+  void RegisterHttpAuthHandler();
+
   HWND hwnd_;
   bool owns_window_;
   bool is_valid_ = false;

@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 
 import 'cursor.dart';
 import 'enums.dart';
+import 'http_auth.dart';
 
 class HistoryChanged {
   final bool canGoBack;
@@ -104,6 +105,45 @@ class WebviewController extends ValueNotifier<WebviewValue> {
 
   PermissionRequestedDelegate? _permissionRequested;
 
+  /// Receives Basic and Digest challenges before the native prompt is shown.
+  /// Complete each request with onProceed or onCancel; no handler cancels it.
+  FutureOr<void> Function(WebviewHttpAuthRequest)? onHttpAuthRequest;
+
+  /// Whether the initialized WebView2 instance supports authentication callbacks.
+  bool get isHttpAuthSupported => _isHttpAuthSupported;
+  bool _isHttpAuthSupported = false;
+
+  Future<void> _onHttpAuthRequested(Map<dynamic, dynamic> args) async {
+    final id = args['id'] as int;
+    var completed = false;
+    Future<void> complete([WebviewHttpAuthCredential? credential]) async {
+      if (completed) return;
+      completed = true;
+      if (_isDisposed) return;
+      await _methodChannel.invokeMethod('completeHttpAuth', {
+        'id': id,
+        if (credential != null) 'user': credential.user,
+        if (credential != null) 'password': credential.password,
+      });
+    }
+
+    final handler = onHttpAuthRequest;
+    if (_isDisposed || handler == null) {
+      await complete();
+      return;
+    }
+    try {
+      await handler(WebviewHttpAuthRequest(
+        uri: Uri.parse(args['uri'] as String),
+        challenge: args['challenge'] as String,
+        onProceed: complete,
+        onCancel: complete,
+      ));
+    } catch (_) {
+      await complete();
+    }
+  }
+
   late MethodChannel _methodChannel;
   late EventChannel _eventChannel;
   StreamSubscription? _eventStreamSubscription;
@@ -177,12 +217,16 @@ class WebviewController extends ValueNotifier<WebviewValue> {
           await _pluginChannel.invokeMapMethod<String, dynamic>('initialize');
 
       _textureId = reply!['textureId'];
+      _isHttpAuthSupported = reply['isHttpAuthSupported'] == true;
       _methodChannel = MethodChannel('$_pluginChannelPrefix/$_textureId');
       _eventChannel = EventChannel('$_pluginChannelPrefix/$_textureId/events');
       _eventStreamSubscription =
           _eventChannel.receiveBroadcastStream().listen((event) {
         final map = event as Map<dynamic, dynamic>;
         switch (map['type']) {
+          case 'httpAuthRequested':
+            unawaited(_onHttpAuthRequested(map['value'] as Map));
+            break;
           case 'urlChanged':
             _currentUrl = map['value'];
             _urlStreamController.add(map['value']);
@@ -275,6 +319,7 @@ class WebviewController extends ValueNotifier<WebviewValue> {
     await _creatingCompleter.future;
     if (!_isDisposed) {
       _isDisposed = true;
+      onHttpAuthRequest = null;
       await _eventStreamSubscription?.cancel();
       await _pluginChannel.invokeMethod('dispose', _textureId);
     }

@@ -16,6 +16,42 @@ A [Flutter](https://flutter.dev/) WebView plugin for Windows built on [Microsoft
 - Windows 11 SDK (10.0.22000.194 or higher)
 - (recommended) nuget.exe in your $PATH *(The makefile attempts to download nuget if it's not installed, however, this fallback might not work in China)*
 
+## HTTP authentication
+
+After initializing the controller, check `isHttpAuthSupported` and set
+`onHttpAuthRequest` before loading a protected URL. The callback handles HTTP
+Basic and Digest authentication; WebView2 performs the authentication protocol.
+
+```dart
+await controller.initialize();
+if (controller.isHttpAuthSupported) {
+  controller.onHttpAuthRequest = (request) async {
+    final credential = await promptForCredentials(request.realm);
+    if (credential == null) {
+      await request.onCancel();
+    } else {
+      await request.onProceed(credential);
+    }
+  };
+}
+```
+
+`promptForCredentials` is your application's dialog, returning a
+`WebviewHttpAuthCredential(user: ..., password: ...)` or `null` to cancel.
+Requests include the URI, host, raw challenge, and parsed realm. The realm can be
+missing or empty.
+
+Each request stays pending until answered. Multiple requests can be pending at
+once, so an application showing dialogs should queue them. Only the first
+response to each request takes effect. With no handler, or if the handler throws,
+the request is cancelled. Disposing the controller cancels all pending requests;
+late responses are ignored.
+
+Custom prompts require a WebView2 runtime exposing `ICoreWebView2_10`.
+`isHttpAuthSupported` is false before initialization and when that capability is
+unavailable. This fork has been tested with Basic authentication and Digest MD5;
+other Digest algorithms have not been verified.
+
 ## Demo
 ![image](https://user-images.githubusercontent.com/720469/116823636-d8b9fe00-ab85-11eb-9f91-b7bc819615ed.png)
 
