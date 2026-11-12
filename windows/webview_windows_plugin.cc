@@ -181,8 +181,6 @@ void WebviewWindowsPlugin::HandleMethodCall(
 
 void WebviewWindowsPlugin::CreateWebviewInstance(
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
-  HWND hParent =
-      reinterpret_cast<HWND>(registrar_->GetView()->GetNativeWindow());
   if (!InitPlatform()) {
     return result->Error(kErrorUnsupportedPlatform,
                          "The platform is not supported");
@@ -221,12 +219,15 @@ void WebviewWindowsPlugin::CreateWebviewInstance(
         auto bridge = std::make_unique<WebviewBridge>(
             messenger_, textures_, platform_->graphics_context(),
             std::move(webview));
+        const auto http_auth_supported = bridge->IsHttpAuthSupported();
         auto texture_id = bridge->texture_id();
         instances_[texture_id] = std::move(bridge);
 
         auto response = flutter::EncodableValue(flutter::EncodableMap{
             {flutter::EncodableValue("textureId"),
              flutter::EncodableValue(texture_id)},
+            {flutter::EncodableValue("isHttpAuthSupported"),
+             flutter::EncodableValue(http_auth_supported)},
         });
 
         shared_result->Success(response);
