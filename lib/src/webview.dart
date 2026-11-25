@@ -17,6 +17,36 @@ class HistoryChanged {
   const HistoryChanged(this.canGoBack, this.canGoForward);
 }
 
+class WebviewProcessFailure {
+  final WebviewProcessFailedKind kind;
+  final WebviewProcessFailedReason? reason;
+  final int? exitCode;
+  final String processDescription;
+
+  const WebviewProcessFailure(
+      {required this.kind,
+      this.reason,
+      this.exitCode,
+      this.processDescription = ''});
+
+  // The runtime updates separately from the SDK and can report newer values.
+  factory WebviewProcessFailure._fromMap(Map<dynamic, dynamic> map) {
+    const kinds = WebviewProcessFailedKind.values;
+    const reasons = WebviewProcessFailedReason.values;
+    final kind = map['kind'] as int;
+    final reason = map['reason'] as int?;
+    return WebviewProcessFailure(
+      kind: kind < kinds.length
+          ? kinds[kind]
+          : WebviewProcessFailedKind.unknownProcessExited,
+      reason:
+          reason != null && reason < reasons.length ? reasons[reason] : null,
+      exitCode: map['exitCode'] as int?,
+      processDescription: map['processDescription'] as String,
+    );
+  }
+}
+
 typedef PermissionRequestedDelegate
     = FutureOr<WebviewPermissionDecision> Function(
         String url, WebviewPermissionKind permissionKind, bool isUserInitiated);
@@ -165,6 +195,17 @@ class WebviewController extends ValueNotifier<WebviewValue> {
   /// A stream reflecting the navigation error when navigation completed with an error.
   Stream<WebErrorStatus> get onLoadError => _onLoadErrorStreamController.stream;
 
+  final StreamController<WebviewProcessFailure>
+      _onProcessFailedStreamController =
+      StreamController<WebviewProcessFailure>.broadcast();
+
+  /// A stream reflecting failures of the WebView2 processes.
+  ///
+  /// After [WebviewProcessFailedKind.browserProcessExited] this controller is
+  /// unusable. Dispose it and initialize a new one.
+  Stream<WebviewProcessFailure> get onProcessFailed =>
+      _onProcessFailedStreamController.stream;
+
   final StreamController<HistoryChanged> _historyChangedStreamController =
       StreamController<HistoryChanged>();
 
@@ -266,6 +307,10 @@ class WebviewController extends ValueNotifier<WebviewValue> {
           case 'containsFullScreenElementChanged':
             _containsFullScreenElementChangedStreamController.add(map['value']);
             break;
+          case 'processFailed':
+            _onProcessFailedStreamController
+                .add(WebviewProcessFailure._fromMap(map['value'] as Map));
+            break;
         }
       });
 
@@ -321,6 +366,7 @@ class WebviewController extends ValueNotifier<WebviewValue> {
       _isDisposed = true;
       onHttpAuthRequest = null;
       await _eventStreamSubscription?.cancel();
+      unawaited(_onProcessFailedStreamController.close());
       await _pluginChannel.invokeMethod('dispose', _textureId);
     }
     super.dispose();

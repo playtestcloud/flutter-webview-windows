@@ -59,6 +59,12 @@ class _ExampleBrowser extends State<ExampleBrowser> {
         windowManager.setFullScreen(flag);
       }));
 
+      _subscriptions.add(_controller.onProcessFailed.listen((failure) {
+        debugPrint('Process failed: ${failure.kind}, '
+            'reason: ${failure.reason}, exit code: ${failure.exitCode}, '
+            'process: ${failure.processDescription}');
+      }));
+
       await _controller.setBackgroundColor(Colors.transparent);
       await _controller.setPopupWindowPolicy(WebviewPopupWindowPolicy.deny);
       await _controller.loadUrl('https://flutter.dev');

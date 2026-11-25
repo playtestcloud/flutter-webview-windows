@@ -43,6 +43,33 @@ enum WebviewPopupWindowPolicy { allow, deny, sameWindow }
 // Order must match WebviewHostResourceAccessKind (see webview.h)
 enum WebviewHostResourceAccessKind { deny, allow, denyCors }
 
+/// The kind of process failure reported by WebView2
+// Order must match COREWEBVIEW2_PROCESS_FAILED_KIND (see WebView2.h)
+enum WebviewProcessFailedKind {
+  browserProcessExited,
+  renderProcessExited,
+  renderProcessUnresponsive,
+  frameRenderProcessExited,
+  utilityProcessExited,
+  sandboxHelperProcessExited,
+  gpuProcessExited,
+  ppapiPluginProcessExited,
+  ppapiBrokerProcessExited,
+  unknownProcessExited
+}
+
+/// The reason for a process failure reported by WebView2
+// Order must match COREWEBVIEW2_PROCESS_FAILED_REASON (see WebView2.h)
+enum WebviewProcessFailedReason {
+  unexpected,
+  unresponsive,
+  terminated,
+  crashed,
+  launchFailed,
+  outOfMemory,
+  profileDeleted
+}
+
 enum WebErrorStatus {
 	WebErrorStatusUnknown,
 	WebErrorStatusCertificateCommonNameIsIncorrect,
