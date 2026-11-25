@@ -52,6 +52,14 @@ Custom prompts require a WebView2 runtime exposing `ICoreWebView2_10`.
 unavailable. This fork has been tested with Basic authentication and Digest MD5;
 other Digest algorithms have not been verified.
 
+## Process failures
+
+`onProcessFailed` reports failed WebView2 processes with their kind, reason, and
+exit code. Call `reload()` after `renderProcessExited`. After
+`browserProcessExited` the controller is unusable, so dispose it and initialize a
+new one. WebView2 does not report a crashed renderer of an iframe nested inside
+another iframe.
+
 ## Demo
 ![image](https://user-images.githubusercontent.com/720469/116823636-d8b9fe00-ab85-11eb-9f91-b7bc819615ed.png)
 

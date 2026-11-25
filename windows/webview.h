@@ -39,6 +39,13 @@ struct WebviewHistoryChanged {
   BOOL can_go_forward;
 };
 
+struct WebviewProcessFailure {
+  COREWEBVIEW2_PROCESS_FAILED_KIND kind;
+  std::optional<COREWEBVIEW2_PROCESS_FAILED_REASON> reason;
+  std::optional<int> exit_code;
+  std::string process_description;
+};
+
 struct VirtualKeyState {
  public:
   inline void set_isLeftButtonDown(bool is_down) {
@@ -90,6 +97,7 @@ struct EventRegistrations {
   EventRegistrationToken devtools_protocol_event_token_{};
   EventRegistrationToken new_windows_requested_token_{};
   EventRegistrationToken contains_fullscreen_element_changed_token_{};
+  EventRegistrationToken process_failed_token_{};
 };
 
 class Webview {
@@ -119,6 +127,8 @@ class Webview {
       PermissionRequestedCallback;
   typedef std::function<void(bool contains_fullscreen_element)>
       ContainsFullScreenElementChangedCallback;
+  typedef std::function<void(const WebviewProcessFailure&)>
+      ProcessFailedCallback;
 
   typedef std::function<bool(int64_t, const std::string&, const std::string&)>
       HttpAuthRequestedCallback;
@@ -221,6 +231,10 @@ class Webview {
     contains_fullscreen_element_changed_callback_ = std::move(callback);
   }
 
+  void OnProcessFailed(ProcessFailedCallback callback) {
+    process_failed_callback_ = std::move(callback);
+  }
+
  private:
   struct PendingHttpAuth {
     wil::com_ptr<ICoreWebView2BasicAuthenticationRequestedEventArgs> args;
@@ -269,6 +283,7 @@ class Webview {
   DevtoolsProtocolEventCallback devtools_protocol_event_callback_;
   ContainsFullScreenElementChangedCallback
       contains_fullscreen_element_changed_callback_;
+  ProcessFailedCallback process_failed_callback_;
 
   Webview(
       wil::com_ptr<ICoreWebView2CompositionController> composition_controller,

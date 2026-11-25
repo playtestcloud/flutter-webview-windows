@@ -100,6 +100,10 @@ Webview::~Webview() {
       }
       http_auth_requested_callback_ = nullptr;
       CancelHttpAuthRequests();
+      if (webview_) {
+        webview_->remove_ProcessFailed(
+            event_registrations_.process_failed_token_);
+      }
       if (composition_controller_) {
         composition_controller_->put_RootVisualTarget(nullptr);
       }
@@ -475,6 +479,41 @@ void Webview::RegisterEventHandlers() {
           })
           .Get(),
       &event_registrations_.contains_fullscreen_element_changed_token_);
+
+  webview_->add_ProcessFailed(
+      Callback<ICoreWebView2ProcessFailedEventHandler>(
+          [this](ICoreWebView2* sender,
+                 ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
+            WebviewProcessFailure failure{};
+            if (!process_failed_callback_ ||
+                FAILED(args->get_ProcessFailedKind(&failure.kind))) {
+              return S_OK;
+            }
+
+            const auto args2 =
+                wil::try_com_query<ICoreWebView2ProcessFailedEventArgs2>(args);
+            if (args2) {
+              COREWEBVIEW2_PROCESS_FAILED_REASON reason;
+              if (SUCCEEDED(args2->get_Reason(&reason))) {
+                failure.reason = reason;
+              }
+              int exit_code;
+              if (SUCCEEDED(args2->get_ExitCode(&exit_code))) {
+                failure.exit_code = exit_code;
+              }
+              wil::unique_cotaskmem_string description;
+              if (SUCCEEDED(args2->get_ProcessDescription(&description)) &&
+                  description) {
+                failure.process_description =
+                    util::Utf8FromUtf16(description.get());
+              }
+            }
+
+            process_failed_callback_(failure);
+            return S_OK;
+          })
+          .Get(),
+      &event_registrations_.process_failed_token_);
 }
 
 void Webview::SetSurfaceSize(size_t width, size_t height, float scale_factor) {
